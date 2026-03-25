@@ -1,0 +1,333 @@
+{
+  "name": "RoboMed AI Inspection -File Mode",
+  "nodes": [
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        368,
+        208
+      ],
+      "id": "9d8ba017-1f3a-40cb-95eb-b6ffb8e58f52",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "7XTn218SL5Dmgjmo",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        0
+      ],
+      "id": "3bfc667f-3859-4ad1-ab07-64b48f084c12",
+      "name": "Workflow Trigger"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"missionPath\": \"/files/robomed_runtime/exports/mission_20260313_121044_summary.json\",\n  \"logPath\": \"/files/robomed_runtime/logs/mission_20260313_121044.log\",\n  \"aiOutputPath\": \"/files/robomed_runtime/exports/ai_inspection.json\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -480,
+        0
+      ],
+      "id": "c085a939-4fe1-497b-83a1-7dff25324279",
+      "name": "Mission Input Initializer"
+    },
+    {
+      "parameters": {
+        "fileSelector": "=/files/robomed_runtime/exports/mission_20260313_121044_summary.json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        -304,
+        0
+      ],
+      "id": "9743a0a5-432f-4968-a81d-b1cebba49cec",
+      "name": "Mission Data Loader"
+    },
+    {
+      "parameters": {
+        "fileSelector": "=/files/robomed_runtime/logs/mission_20260313_121044.log",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        -304,
+        -176
+      ],
+      "id": "6cb32b50-9d52-49f1-9a6b-fe6c902f26c6",
+      "name": "Robot Log Loader"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -144,
+        -176
+      ],
+      "id": "2757da23-a447-4fa4-ab44-b5d2d52ce9a2",
+      "name": "Robot Log Parser"
+    },
+    {
+      "parameters": {
+        "operation": "fromJson",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -144,
+        0
+      ],
+      "id": "b53a5405-0e25-45fc-8274-5e6ca3192726",
+      "name": "Mission JSON Parser"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        80,
+        0
+      ],
+      "id": "626b0d99-4ed8-43e3-b28d-7708cbf72cd2",
+      "name": "Mission & Log Fusion Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $json;\n\n// ---------- helpers ----------\nfunction isObject(v) {\n  return v && typeof v === \"object\" && !Array.isArray(v);\n}\n\nfunction asNumber(v) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction hasValue(v) {\n  return v !== undefined && v !== null && v !== \"\";\n}\n\nfunction findFirstByKeys(node, keys) {\n  if (Array.isArray(node)) {\n    for (const item of node) {\n      const found = findFirstByKeys(item, keys);\n      if (found !== undefined) return found;\n    }\n    return undefined;\n  }\n  if (!isObject(node)) return undefined;\n\n  for (const k of Object.keys(node)) {\n    if (keys.includes(k) && node[k] !== undefined && node[k] !== null && node[k] !== \"\") {\n      return node[k];\n    }\n  }\n\n  for (const k of Object.keys(node)) {\n    const found = findFirstByKeys(node[k], keys);\n    if (found !== undefined) return found;\n  }\n\n  return undefined;\n}\n\nfunction findArrayByLikelyKeys(node, keys) {\n  const found = findFirstByKeys(node, keys);\n  return Array.isArray(found) ? found : [];\n}\n\nfunction gatherAllStrings(node, out = []) {\n  if (typeof node === \"string\") out.push(node);\n  else if (Array.isArray(node)) {\n    for (const x of node) gatherAllStrings(x, out);\n  } else if (isObject(node)) {\n    for (const k of Object.keys(node)) gatherAllStrings(node[k], out);\n  }\n  return out;\n}\n\nfunction normalizeBool(v, fallback = false) {\n  if (typeof v === \"boolean\") return v;\n  if (typeof v === \"number\") return v !== 0;\n  if (typeof v === \"string\") {\n    const s = v.trim().toLowerCase();\n    if ([\"true\", \"yes\", \"1\", \"found\", \"completed\", \"success\"].includes(s)) return true;\n    if ([\"false\", \"no\", \"0\", \"missing\", \"not_found\", \"failed\"].includes(s)) return false;\n  }\n  return fallback;\n}\n\n// ---------- raw text ----------\nconst allStrings = gatherAllStrings(root, []);\nconst combinedText = allStrings.join(\" | \");\n\n// ---------- states ----------\nlet states = findArrayByLikelyKeys(root, [\"states\", \"state_history\", \"timeline\", \"transitions\"]);\nstates = states.filter(x => isObject(x));\n\n// ---------- derive patient found ----------\nconst patientFound =\n  normalizeBool(findFirstByKeys(root, [\"patient_found\", \"patient_detected\", \"target_found\"]), false) ||\n  states.some(s => String(s.to || \"\").toUpperCase() === \"READ_BED_LABEL\") ||\n  states.some(s => String(s.to || \"\").toUpperCase() === \"FIND_MONITOR\") ||\n  states.some(s => String(s.to || \"\").toUpperCase() === \"SAVE_RESULTS\") ||\n  /patient found|patient found and approached/i.test(combinedText);\n\n// ---------- derive clinical check done ----------\nconst clinicalCheckDone =\n  normalizeBool(findFirstByKeys(root, [\"clinical_check_done\", \"monitor_found\", \"vitals_monitor_found\", \"screen_found\"]), false) ||\n  states.some(s => String(s.to || \"\").toUpperCase() === \"SAVE_RESULTS\") ||\n  /monitor snapshot saved|results saved/i.test(combinedText);\n\n// ---------- mission complete ----------\nconst missionComplete =\n  normalizeBool(findFirstByKeys(root, [\"mission_complete\", \"completed\", \"success\"]), false) ||\n  clinicalCheckDone ||\n  /review required|completed|success|done/i.test(combinedText);\n\n// ---------- direct fields ----------\nconst urgencyLevel = findFirstByKeys(root, [\"urgency_level\", \"urgency\"]) ?? null;\nconst clinicalNote = findFirstByKeys(root, [\"clinical_note\", \"summary_note\", \"note\"]) ?? null;\nconst statusLight = findFirstByKeys(root, [\"status_light\"]) ?? null;\nconst missionStatusText = findFirstByKeys(root, [\"mission_status_text\", \"mission_status\", \"status_text\"]) ?? null;\n\n// ---------- vitals ----------\nconst hr = asNumber(findFirstByKeys(root, [\"heart_rate_bpm\", \"hr\", \"heart_rate\"]));\nconst spo2 = asNumber(findFirstByKeys(root, [\"spo2_percent\", \"spo2\"]));\nconst temp = asNumber(findFirstByKeys(root, [\n  \"temperature_c\",\n  \"face_temperature_c\",\n  \"forehead_temperature_c\",\n  \"chest_temperature_c\"\n]));\nconst rr = asNumber(findFirstByKeys(root, [\n  \"respiration_rpm\",\n  \"respiration_rate_bpm\",\n  \"respiratory_rate\",\n  \"rr\"\n]));\n\nconst vitalsAvailable =\n  hasValue(hr) || hasValue(spo2) || hasValue(temp) || hasValue(rr) ||\n  hasValue(urgencyLevel) || hasValue(clinicalNote);\n\n// ---------- emergency ----------\nconst emergencyCase =\n  normalizeBool(findFirstByKeys(root, [\"emergency_case\", \"emergency\", \"is_emergency\"]), false) ||\n  String(urgencyLevel || \"\").toLowerCase() === \"high\" ||\n  String(statusLight || \"\").toLowerCase() === \"red\" ||\n  /urgent human review|unstable patient|emergency/i.test(combinedText);\n\n// ---------- risk signals ----------\nconst riskSignals = [];\nif (hasValue(hr) && hr >= 120) riskSignals.push(\"tachycardia\");\nif (hasValue(spo2) && spo2 < 90) riskSignals.push(\"hypoxemia\");\nif (hasValue(temp) && temp >= 38.5) riskSignals.push(\"fever\");\nif (hasValue(rr) && rr > 24) riskSignals.push(\"high respiratory rate\");\nif (String(urgencyLevel || \"\").toLowerCase() === \"high\") riskSignals.push(\"high urgency level\");\nif (String(statusLight || \"\").toLowerCase() === \"red\") riskSignals.push(\"critical status light\");\nif (/urgent human review/i.test(combinedText)) riskSignals.push(\"urgent human review recommended\");\nif (/unstable patient/i.test(combinedText)) riskSignals.push(\"clinical instability noted\");\n\n// ---------- risk ----------\nlet preliminaryRisk = \"Low\";\nif (emergencyCase || riskSignals.includes(\"hypoxemia\") || riskSignals.length >= 3) {\n  preliminaryRisk = \"Critical\";\n} else if (riskSignals.length === 2) {\n  preliminaryRisk = \"High\";\n} else if (riskSignals.length === 1) {\n  preliminaryRisk = \"Moderate\";\n}\n\n// ---------- explainability ----------\nconst explainabilityHints = [];\nif (patientFound) explainabilityHints.push(\"Patient was found and approached.\");\nif (clinicalCheckDone) explainabilityHints.push(\"Clinical check reached result-saving stage.\");\nif (hasValue(hr)) explainabilityHints.push(`Heart rate: ${hr} bpm.`);\nif (hasValue(spo2)) explainabilityHints.push(`SpO2: ${spo2}%.`);\nif (hasValue(temp)) explainabilityHints.push(`Temperature: ${temp} °C.`);\nif (hasValue(rr)) explainabilityHints.push(`Respiration rate: ${rr} rpm.`);\nif (urgencyLevel) explainabilityHints.push(`Urgency level: ${urgencyLevel}.`);\nif (clinicalNote) explainabilityHints.push(String(clinicalNote));\nif (missionStatusText) explainabilityHints.push(`Mission status: ${missionStatusText}.`);\n\nreturn [\n  {\n    json: {\n      available: true,\n      patient_found: patientFound,\n      clinical_check_done: clinicalCheckDone,\n      vitals_available: vitalsAvailable,\n      mission_complete: missionComplete,\n      emergency_case: emergencyCase,\n      urgency_level: urgencyLevel,\n      clinical_note: clinicalNote,\n      status_light: statusLight,\n      mission_status_text: missionStatusText,\n      vitals: {\n        heart_rate_bpm: hr,\n        spo2_percent: spo2,\n        temperature_c: temp,\n        respiration_rpm: rr\n      },\n      risk_signals: riskSignals,\n      preliminary_risk: preliminaryRisk,\n      explainability_hints: explainabilityHints,\n      validation: {\n        patient_not_found: !patientFound,\n        clinical_check_missing: !clinicalCheckDone,\n        vitals_missing: !vitalsAvailable,\n        mission_incomplete: !missionComplete\n      },\n      raw_states: states\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        0
+      ],
+      "id": "5297c46b-5706-46a4-ab66-bb9aa1c65388",
+      "name": "Clinical Signal Extraction Engine"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the AI clinical inspection module for RoboMed, a bedside patient-monitoring robot.\n\nYou receive a PREPROCESSED clinical summary generated from robot mission data and robot logs.\nYour task is to interpret this summary and produce a hospital-friendly AI inspection result for the RoboMed dashboard.\n\nIMPORTANT:\nReturn ONLY valid JSON.\nDo not wrap the JSON in markdown.\nDo not add explanations before or after the JSON.\nDo not return nested medical records or raw copied fields.\nDo not echo the input.\nDo not invent extra keys.\n\nReturn EXACTLY this schema:\n\n{\n  \"available\": true,\n  \"assessment\": \"one short paragraph summarizing the patient condition and mission outcome\",\n  \"risk_level\": \"Low\",\n  \"recommendation\": \"one short actionable recommendation\",\n  \"confidence\": 0.0,\n  \"summary\": \"one short summary line for the dashboard\",\n  \"explainability\": [\n    \"reason 1\",\n    \"reason 2\",\n    \"reason 3\"\n  ],\n  \"alerts\": [\n    \"alert 1\",\n    \"alert 2\"\n  ]\n}\n\nRules:\n- risk_level must be exactly one of: Low, Moderate, High, Critical\n- confidence must be a number between 0 and 1\n- assessment must be a readable sentence or short paragraph, not a nested object\n- recommendation must be concise, practical, and action-oriented\n- summary must be short and suitable for the dashboard\n- explainability must contain short reason statements\n- alerts must contain short alert phrases\n- if emergency_case is true, risk_level should usually be High or Critical\n- if spo2_percent is below 90, risk_level should usually be Critical\n- if heart_rate_bpm is very high, temperature is high, or multiple risk_signals are present, recommend immediate human assessment\n- if patient_found is false, clearly state that the patient could not be confirmed\n- if clinical_check_done is false, clearly state that the bedside clinical check was incomplete\nIf patient_found is false, clinical_check_done is false, or vitals are missing, treat the mission as incomplete.\nDo not classify the case as Low risk when the patient was not found or no assessment was performed.\nIn such cases, describe the result as an incomplete mission and recommend repeating the assessment.\n- if data is incomplete, say so clearly but still return valid JSON\n- available should be true if analysis was possible\n\nInterpretation guidance:\n- \"tachycardia\" increases concern\n- \"hypoxemia\" is a strong danger signal\n- \"fever\" increases concern\n- multiple risk_signals together should increase risk level\n- use preliminary_risk as a strong hint, but refine it if needed\n- recommendation should match the severity\n- confidence should be higher when the signals are clear and internally consistent\n\nPreprocessed clinical summary:\n{{ JSON.stringify($json, null, 2) }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "="
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        480,
+        0
+      ],
+      "id": "61a94c20-aac7-496e-9daf-b6488202737d",
+      "name": "AI Clinical Decision Engine"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $json;\n\n// Sometimes the model output arrives inside a `text` field as a JSON string\nif (typeof raw.text === 'string') {\n  try {\n    raw = JSON.parse(raw.text);\n  } catch (e) {\n    const match = raw.text.match(/\\{[\\s\\S]*\\}/);\n    if (match) {\n      try {\n        raw = JSON.parse(match[0]);\n      } catch {\n        raw = { raw_text: raw.text };\n      }\n    } else {\n      raw = { raw_text: raw.text };\n    }\n  }\n}\n\n// Helper\nfunction asArray(v) {\n  return Array.isArray(v) ? v : [];\n}\n\nfunction asRisk(v) {\n  const allowed = [\"Low\", \"Moderate\", \"High\", \"Critical\"];\n  return allowed.includes(v) ? v : \"Unknown\";\n}\n\nconst finalJson = {\n  available: raw.available ?? true,\n  assessment:\n    typeof raw.assessment === \"string\"\n      ? raw.assessment\n      : raw.clinical_note\n      ?? raw.summary\n      ?? \"No assessment available.\",\n  risk_level:\n    asRisk(raw.risk_level)\n      || (raw.assessment?.urgency_level === \"high\" ? \"High\" : \"Unknown\"),\n  recommendation:\n    typeof raw.recommendation === \"string\"\n      ? raw.recommendation\n      : raw.human_review_recommended\n      ? \"Immediate human assessment required.\"\n      : \"No recommendation available.\",\n  confidence:\n    typeof raw.confidence === \"number\"\n      ? raw.confidence\n      : 0.75,\n  summary:\n    typeof raw.summary === \"string\"\n      ? raw.summary\n      : typeof raw.mission_status_text === \"string\"\n      ? raw.mission_status_text\n      : \"No summary available.\",\n  explainability:\n    asArray(raw.explainability).length\n      ? raw.explainability\n      : [\n          raw.clinical_note,\n          raw.assessment?.urgency_level ? `Urgency level: ${raw.assessment.urgency_level}` : null,\n          raw.vitals?.spo2_percent ? `SpO2: ${raw.vitals.spo2_percent}%` : null,\n          raw.vitals?.heart_rate_bpm ? `Heart rate: ${raw.vitals.heart_rate_bpm} bpm` : null,\n          raw.vitals?.temperature_c ? `Temperature: ${raw.vitals.temperature_c} °C` : null\n        ].filter(Boolean),\n  alerts:\n    asArray(raw.alerts).length\n      ? raw.alerts\n      : [\n          raw.assessment?.urgency_level === \"high\" ? \"High urgency patient condition\" : null,\n          raw.human_review_recommended ? \"Human review recommended\" : null,\n          raw.status_light === \"red\" ? \"Critical status light triggered\" : null\n        ].filter(Boolean)\n};\n\nconst jsonString = JSON.stringify(finalJson, null, 2);\n\nreturn [\n  {\n    binary: {\n      data: {\n        data: Buffer.from(jsonString).toString(\"base64\"),\n        mimeType: \"application/json\",\n        fileName: \"ai_inspection.json\"\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        0
+      ],
+      "id": "45e68f31-11e2-4257-872c-1b540aebc821",
+      "name": "AI Output Formatter & Validator"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "/files/robomed_runtime/exports/ai_inspection.json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "45ab6774-6c89-498e-aafc-93c1a6d4cb3d",
+      "name": "Clinical Report Exporter"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Clinical Decision Engine",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Mission Input Initializer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mission Input Initializer": {
+      "main": [
+        [
+          {
+            "node": "Robot Log Loader",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mission Data Loader",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mission Data Loader": {
+      "main": [
+        [
+          {
+            "node": "Mission JSON Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Robot Log Loader": {
+      "main": [
+        [
+          {
+            "node": "Robot Log Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Robot Log Parser": {
+      "main": [
+        [
+          {
+            "node": "Mission & Log Fusion Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mission JSON Parser": {
+      "main": [
+        [
+          {
+            "node": "Mission & Log Fusion Engine",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Mission & Log Fusion Engine": {
+      "main": [
+        [
+          {
+            "node": "Clinical Signal Extraction Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinical Signal Extraction Engine": {
+      "main": [
+        [
+          {
+            "node": "AI Clinical Decision Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Clinical Decision Engine": {
+      "main": [
+        [
+          {
+            "node": "AI Output Formatter & Validator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Output Formatter & Validator": {
+      "main": [
+        [
+          {
+            "node": "Clinical Report Exporter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinical Report Exporter": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "16411895-aab2-4898-b306-fa6b60b1ed45",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1cd384caff006682afddc0f8396a4876df28bea945681630ecf4ba048dd0c205"
+  },
+  "id": "P5PCfCMID4L4DgNp",
+  "tags": []
+}
