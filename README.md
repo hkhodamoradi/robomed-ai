@@ -46,11 +46,19 @@ RoboMed consists of multiple layers:
 robomed-ai/
 ├── dashboard/        # Streamlit interface
 ├── ai_pipeline/      # AI / LLM processing logic
-├── runtime/          # generated data (ignored in Git)
-├── docs/             # architecture and notes
-└── assets/           # images and media
 
 ## Simulation
 
 Simulation environment:
 https://github.com/hkhodamoradi/robomed-simulation
+
+## Demo
+
+Full system demo:
+[Add full demo link here]
+
+Robot perspective:
+https://youtu.be/BnZjWKFgz0M
+
+Top view:
+https://youtu.be/SilspwN7Z0g
